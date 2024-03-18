@@ -110,9 +110,10 @@ fn main() -> anyhow::Result<()> {
                     f.seek(std::io::SeekFrom::Start(arch.offset + entryoff + ip))?;
                     f.write(&opcode)?;
                     f.flush()?;
+
+                    break;
                 }
             }
-            break;
         }
     }
 
