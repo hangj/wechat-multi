@@ -1,4 +1,4 @@
-# 微信多开
+# Mac 微信多开
 
 自动在 `main` 函数中找到下面的代码
 
@@ -10,7 +10,7 @@ jb     loc_00000012345678
 并将 `jb` 修改为 `jmp`
 
 
-## 注意去掉签名
+# TLDR
 ```console
 # 改权限
 sudo chown -R $(whoami) /Applications/WeChat.app
@@ -18,8 +18,13 @@ sudo chown -R $(whoami) /Applications/WeChat.app
 cp /Applications/WeChat.app/Contents/MacOS/WeChat /Applications/WeChat.app/Contents/MacOS/WeChat.bak
 # https://keith.github.io/xcode-man-pages/codesign.1.html
 codesign --remove-signature /Applications/WeChat.app/Contents/MacOS/WeChat 
+
+cargo install --git https://github.com/hangj/wechat-multi.git
+wechat-multi /Applications/WeChat.app/Contents/MacOS/WeChat
+echo 'done'
 ```
 
+================================================================
 
 # 先找到 architecture 的偏移
 

@@ -1,10 +1,15 @@
-use std::{fs::{File, OpenOptions}, io::{Read, Seek, Write}};
+use std::{
+    fs::{File, OpenOptions},
+    io::{Read, Seek, Write},
+};
 
-use iced_x86::{Code, Decoder, DecoderOptions, Encoder, Formatter, Instruction, IntelFormatter, Register};
-use mach_object::{FatArch, FatHeader, MachHeader, CPU_ARCH_ABI64, CPU_SUBTYPE_X86_64_ALL, CPU_TYPE_X86_64, FAT_MAGIC, LC_MAIN, MH_CIGAM, MH_CIGAM_64, MH_EXECUTE, MH_MAGIC, MH_MAGIC_64};
-
-
-// mod cpu_endian;
+use iced_x86::{
+    Code, Decoder, DecoderOptions, Encoder, Formatter, Instruction, IntelFormatter, Register,
+};
+use mach_object::{
+    FatArch, FatHeader, MachHeader, CPU_ARCH_ABI64, CPU_SUBTYPE_X86_64_ALL, CPU_TYPE_X86_64,
+    FAT_MAGIC, LC_MAIN, MH_CIGAM, MH_CIGAM_64, MH_EXECUTE, MH_MAGIC, MH_MAGIC_64,
+};
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<_> = std::env::args().collect();
@@ -16,7 +21,9 @@ fn main() -> anyhow::Result<()> {
     let fat = parse_fat_header(&mut f)?;
     println!("fat_header: {:#?}", fat);
 
-    let arch = fat.archs.iter()
+    let arch = fat
+        .archs
+        .iter()
         .find(|arch| arch.cputype == CPU_TYPE_X86_64 && arch.cpusubtype == CPU_SUBTYPE_X86_64_ALL)
         .expect("Can't find x86_64 architecture");
 
@@ -67,7 +74,10 @@ fn main() -> anyhow::Result<()> {
             break;
         }
 
-        if instruction.code() == Code::Cmp_rm64_imm8 && instruction.memory_base() == Register::RBP && instruction.memory_displ_size() == 1{
+        if instruction.code() == Code::Cmp_rm64_imm8
+            && instruction.memory_base() == Register::RBP
+            && instruction.memory_displ_size() == 1
+        {
             let imm = instruction.immediate8();
             let imm2 = instruction.immediate8_2nd();
             println!("imm: {:02x?}", imm); // 0x2
@@ -137,7 +147,7 @@ fn parse_fat_header(f: &mut File) -> anyhow::Result<FatHeader> {
         let arch = parse_fat_arch(f)?;
         archs.push(arch);
     }
-    
+
     Ok(FatHeader { magic, archs })
 }
 
@@ -207,7 +217,7 @@ fn parse_mach_header(f: &mut File) -> anyhow::Result<MachHeader> {
     }
 
     if cputype & CPU_ARCH_ABI64 != 0 {
-        // ignore reserved 
+        // ignore reserved
         f.seek(std::io::SeekFrom::Current(4))?;
     }
 
@@ -222,10 +232,13 @@ fn parse_mach_header(f: &mut File) -> anyhow::Result<MachHeader> {
     })
 }
 
-
 #[test]
 fn test_decoder() -> anyhow::Result<()> {
-    let mut decoder = Decoder::new(64, &[0x0f, 0x82, 0xce, 0x02, 0x00, 0x00], DecoderOptions::NONE);
+    let mut decoder = Decoder::new(
+        64,
+        &[0x0f, 0x82, 0xce, 0x02, 0x00, 0x00],
+        DecoderOptions::NONE,
+    );
     let ins = decoder.decode();
 
     let mut encoder = Encoder::new(64);

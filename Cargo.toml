@@ -2,6 +2,13 @@
 name = "wechat-multi"
 version = "0.1.0"
 edition = "2021"
+authors = ["hangj <guijie.han@gmail.com>"]
+readme = "README.md"
+description = "Mac 版微信多开"
+license = "MIT"
+repository = "https://github.com/hangj/wechat-multi"
+documentation = "https://docs.rs/wechat-multi/"
+exclude = ["/.github/*", "/.gitattributes", "/appveyor.yml", "/Changelog.md", "/clippy.toml", "/codecov.yml"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
