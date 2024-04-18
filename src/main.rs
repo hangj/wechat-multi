@@ -39,6 +39,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Create a backup file if path.bak doesn't exist
 fn backup(path: &str) -> anyhow::Result<()> {
     // check if backup file exists
     let backup_file = format!("{path}.bak");
@@ -72,6 +73,10 @@ fn process_ofile(ofile: &OFile, cursor: &mut Cursor<&mut [u8]>) -> anyhow::Resul
             assert_eq!(header.filetype, MH_EXECUTE);
             let posotion = cursor.position();
 
+            // Delete CodeSignature
+            // https://keith.github.io/xcode-man-pages/codesign.1.html
+            // codesign --remove-signature /Applications/WeChat.app/Contents/MacOS/WeChat
+            // codesign --display --verbose=4 /Applications/WeChat.app/Contents/MacOS/WeChat
             if let Some((idx, MachCommand(LoadCommand::CodeSignature(_cs), cmdsize))) = commands
                 .iter()
                 .enumerate()
@@ -86,7 +91,6 @@ fn process_ofile(ofile: &OFile, cursor: &mut Cursor<&mut [u8]>) -> anyhow::Resul
                 //         .ok_or(anyhow::anyhow!("The path to WeChat is not provided"))?,
                 // ));
 
-                // Delete CodeSignature
                 let ncmds = header.ncmds - 1;
                 let sizeofcmds = header.sizeofcmds - *cmdsize as u32;
 

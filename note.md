@@ -1,10 +1,26 @@
 
-# 1
+# note
 https://defuse.ca/online-x86-assembler.htm
 
 
 https://shell-storm.org/online/Online-Assembler-and-Disassembler/?arch=arm64
 
+```console
+# 查看签名
+codesign --display --verbose=4 /Applications/WeChat.app/Contents/MacOS/WeChat
+
+# 改权限
+sudo chown -R $(whoami) /Applications/WeChat.app
+
+# 备份
+cp /Applications/WeChat.app/Contents/MacOS/WeChat /Applications/WeChat.app/Contents/MacOS/WeChat.bak
+
+# 去除签名
+# https://keith.github.io/xcode-man-pages/codesign.1.html
+codesign --remove-signature /Applications/WeChat.app/Contents/MacOS/WeChat
+```
+
+# opcode
 
 Raw Hex (zero bytes in bold):
 
@@ -22,7 +38,7 @@ Disassembly:
 0:  48 83 7d d0 02          cmp    QWORD PTR [rbp-0x30],0x2
 
 
-# 2
+------
 
 Raw Hex (zero bytes in bold):
 
@@ -40,7 +56,7 @@ Disassembly:
 0:  e9 cf 02 00 00          jmp    0x2d4
 
 
-# 3
+----
 
 Raw Hex (zero bytes in bold):
 
