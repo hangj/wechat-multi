@@ -7,7 +7,7 @@ use iced_x86::{
     Code, Decoder, DecoderOptions, Encoder, Formatter, Instruction, IntelFormatter, Register,
 };
 use mach_object::{
-    LoadCommand, OFile, CPU_SUBTYPE_ARM_ALL, CPU_SUBTYPE_X86_64_ALL, CPU_TYPE_ARM64,
+    LoadCommand, MachCommand, OFile, CPU_SUBTYPE_ARM_ALL, CPU_SUBTYPE_X86_64_ALL, CPU_TYPE_ARM64,
     CPU_TYPE_X86_64, MH_EXECUTE,
 };
 
@@ -25,6 +25,8 @@ fn main() -> anyhow::Result<()> {
         return Err(anyhow::anyhow!("Usage: {} path/to/file", args[0]));
     }
 
+    backup(&args[1])?;
+
     let mut file = File::options().write(true).read(true).open(&args[1])?;
     // let mmap = unsafe { Mmap::map(&file) }?;
     let mut mmap = unsafe { MmapMut::map_mut(&mut file) }?;
@@ -33,6 +35,21 @@ fn main() -> anyhow::Result<()> {
     let ofile = OFile::parse(&mut cur)?;
 
     process_ofile(&ofile, &mut cur)?;
+
+    Ok(())
+}
+
+fn backup(path: &str) -> anyhow::Result<()> {
+    // check if backup file exists
+    let backup_file = format!("{path}.bak");
+    if std::path::Path::new(&backup_file).try_exists()? {
+        println!("backup file found: {}", backup_file);
+        return Ok(());
+    }
+
+    println!("backup file creating ...");
+    std::fs::copy(path, &backup_file)?;
+    println!("backup file created: {}", backup_file);
 
     Ok(())
 }
@@ -55,33 +72,61 @@ fn process_ofile(ofile: &OFile, cursor: &mut Cursor<&mut [u8]>) -> anyhow::Resul
             assert_eq!(header.filetype, MH_EXECUTE);
             let posotion = cursor.position();
 
-            for cmd in commands.iter().map(|load| load.command()) {
-                match cmd {
-                    LoadCommand::EntryPoint { entryoff, .. } => {
-                        cursor.seek(std::io::SeekFrom::Start(posotion + *entryoff))?;
-                    }
-                    LoadCommand::CodeSignature(_cs) => {
-                        return Err(anyhow::anyhow!(
-                            "You need to remove the code_signature first\n{} '{}'",
-                            "codesign --remove-signature",
-                            std::env::args()
-                                .skip(1)
-                                .next()
-                                .ok_or(anyhow::anyhow!("The path to WeChat is not provided"))?,
-                        ));
+            if let Some((idx, MachCommand(LoadCommand::CodeSignature(_cs), cmdsize))) = commands
+                .iter()
+                .enumerate()
+                .find(|(_, cmd)| matches!(cmd, MachCommand(LoadCommand::CodeSignature(_), _)))
+            {
+                // return Err(anyhow::anyhow!(
+                //     "You need to remove the code_signature first\n{} '{}'",
+                //     "codesign --remove-signature",
+                //     std::env::args()
+                //         .skip(1)
+                //         .next()
+                //         .ok_or(anyhow::anyhow!("The path to WeChat is not provided"))?,
+                // ));
 
-                        // let position = cursor.position();
-                        // cursor.seek(std::io::SeekFrom::Start(posotion + cs.off as u64))?;
-                        // let mut buf = Vec::with_capacity(cs.size as usize);
-                        // buf.resize(cs.size as usize, 0);
-                        // cursor.read_exact(&mut buf)?;
+                // Delete CodeSignature
+                let ncmds = header.ncmds - 1;
+                let sizeofcmds = header.sizeofcmds - *cmdsize as u32;
 
-                        // println!("code_signature: {:02x?}", buf);
-                        // println!("code_signature: {}", String::from_utf8_lossy(&buf));
-                        // cursor.seek(std::io::SeekFrom::Start(position))?;
-                    }
-                    _ => {}
-                }
+                let (ncmds, sizeofcmds) = if header.is_bigend() {
+                    (ncmds.to_be_bytes(), sizeofcmds.to_be_bytes())
+                } else {
+                    (ncmds.to_le_bytes(), sizeofcmds.to_le_bytes())
+                };
+                // skip magic, cputype, cpusubtype and filetype
+                cursor.seek(std::io::SeekFrom::Start(posotion + 16))?;
+                cursor.write(&ncmds)?;
+                cursor.write(&sizeofcmds)?;
+
+                let pre_cmds_size = commands
+                    .iter()
+                    .take(idx)
+                    .map(|cmd| cmd.size())
+                    .sum::<usize>();
+
+                let len = header.sizeofcmds as usize - pre_cmds_size - *cmdsize;
+                let mut buf = vec![0u8; len];
+
+                cursor.seek(std::io::SeekFrom::Start(
+                    posotion + pre_cmds_size as u64 + *cmdsize as u64,
+                ))?;
+                cursor.read_exact(&mut buf)?;
+
+                cursor.seek(std::io::SeekFrom::Start(posotion + pre_cmds_size as u64))?;
+                cursor.write_all(&buf)?;
+            }
+
+            // Find the EntryPoint
+            if let Some(LoadCommand::EntryPoint { entryoff, .. }) = commands
+                .iter()
+                .map(|cmd| cmd.command())
+                .find(|cmd| matches!(cmd, LoadCommand::EntryPoint { .. }))
+            {
+                cursor.seek(std::io::SeekFrom::Start(posotion + *entryoff))?;
+            } else {
+                return Err(anyhow::anyhow!("No EntryPoint found."));
             }
 
             if header.cputype == CPU_TYPE_X86_64 && header.cpusubtype == CPU_SUBTYPE_X86_64_ALL {
@@ -129,7 +174,7 @@ pub fn x86(cursor: &mut Cursor<&mut [u8]>) -> anyhow::Result<()> {
             // let imm2 = instruction.immediate8_2nd();
             // println!("imm2: {:02x?}", imm2); // 0xd0
 
-            encoder.encode(&instruction, 0)?;
+            // encoder.encode(&instruction, 0)?;
             // let opcode = encoder.take_buffer();
             // println!("opcode: {:02x?}", opcode);
 
@@ -145,9 +190,11 @@ pub fn x86(cursor: &mut Cursor<&mut [u8]>) -> anyhow::Result<()> {
                 if instruction.is_invalid() {
                     break;
                 }
-                encoder.encode(&instruction, ip)?;
+                // encoder.encode(&instruction, ip)?;
                 // let opcode = encoder.take_buffer();
                 // println!("opcode: {:02x?}", opcode);
+                // let opcode_len = opcode.len();
+
                 output.clear();
                 formatter.format(&instruction, &mut output);
                 // println!("{}", output);
