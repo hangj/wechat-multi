@@ -1,15 +1,23 @@
 use std::{
-    fs::{File, OpenOptions},
-    io::{Read, Seek, Write},
+    fs::File,
+    io::{Cursor, Read, Seek, Write},
 };
 
 use iced_x86::{
     Code, Decoder, DecoderOptions, Encoder, Formatter, Instruction, IntelFormatter, Register,
 };
 use mach_object::{
-    FatArch, FatHeader, MachHeader, CPU_ARCH_ABI64, CPU_SUBTYPE_X86_64_ALL, CPU_TYPE_X86_64,
-    FAT_MAGIC, LC_MAIN, MH_CIGAM, MH_CIGAM_64, MH_EXECUTE, MH_MAGIC, MH_MAGIC_64,
+    LoadCommand, OFile, CPU_SUBTYPE_ARM_ALL, CPU_SUBTYPE_X86_64_ALL, CPU_TYPE_ARM64,
+    CPU_TYPE_X86_64, MH_EXECUTE,
 };
+
+use disarm64::{
+    decoder::{self, Operation, ADDSUB_IMM, B_ADDR_PCREL26, CONDBRANCH},
+    registers::get_int_reg_name,
+    Opcode,
+};
+
+use memmap::MmapMut;
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<_> = std::env::args().collect();
@@ -17,45 +25,84 @@ fn main() -> anyhow::Result<()> {
         return Err(anyhow::anyhow!("Usage: {} path/to/file", args[0]));
     }
 
-    let mut f = File::open(&args[1])?;
-    let fat = parse_fat_header(&mut f)?;
-    println!("fat_header: {:#?}", fat);
+    let mut file = File::options().write(true).read(true).open(&args[1])?;
+    // let mmap = unsafe { Mmap::map(&file) }?;
+    let mut mmap = unsafe { MmapMut::map_mut(&mut file) }?;
+    let payload = mmap.as_mut();
+    let mut cur = Cursor::new(payload);
+    let ofile = OFile::parse(&mut cur)?;
 
-    let arch = fat
-        .archs
-        .iter()
-        .find(|arch| arch.cputype == CPU_TYPE_X86_64 && arch.cpusubtype == CPU_SUBTYPE_X86_64_ALL)
-        .expect("Can't find x86_64 architecture");
+    process_ofile(&ofile, &mut cur)?;
 
-    f.seek(std::io::SeekFrom::Start(arch.offset))?;
+    Ok(())
+}
 
-    let mach_header = parse_mach_header(&mut f)?;
-    println!("mach_header: {:#?}", mach_header);
-
-    assert_eq!(mach_header.filetype, MH_EXECUTE);
-
-    let mut entryoff = 0;
-
-    let mut bytes = [0u8; 4];
-    for _ in 0..mach_header.ncmds {
-        f.read_exact(&mut bytes)?;
-        let cmd = u32::from_le_bytes(bytes);
-        f.read_exact(&mut bytes)?;
-        let cmdsize = u32::from_le_bytes(bytes);
-        if cmd != LC_MAIN {
-            f.seek(std::io::SeekFrom::Current(cmdsize as i64 - 8))?;
-        } else {
-            let mut bytes = [0u8; 8];
-            f.read_exact(&mut bytes)?;
-            entryoff = u64::from_le_bytes(bytes);
-            break;
+fn process_ofile(ofile: &OFile, cursor: &mut Cursor<&mut [u8]>) -> anyhow::Result<()> {
+    match ofile {
+        OFile::FatFile {
+            magic: _,
+            ref files,
+        } => {
+            for &(ref arch, ref file) in files {
+                cursor.seek(std::io::SeekFrom::Start(arch.offset))?;
+                process_ofile(file, cursor)?;
+            }
         }
+        OFile::MachFile {
+            ref header,
+            ref commands,
+        } => {
+            assert_eq!(header.filetype, MH_EXECUTE);
+            let posotion = cursor.position();
+
+            for cmd in commands.iter().map(|load| load.command()) {
+                match cmd {
+                    LoadCommand::EntryPoint { entryoff, .. } => {
+                        cursor.seek(std::io::SeekFrom::Start(posotion + *entryoff))?;
+                    }
+                    LoadCommand::CodeSignature(_cs) => {
+                        return Err(anyhow::anyhow!(
+                            "You need to remove the code_signature first\n{} '{}'",
+                            "codesign --remove-signature",
+                            std::env::args()
+                                .skip(1)
+                                .next()
+                                .ok_or(anyhow::anyhow!("The path to WeChat is not provided"))?,
+                        ));
+
+                        // let position = cursor.position();
+                        // cursor.seek(std::io::SeekFrom::Start(posotion + cs.off as u64))?;
+                        // let mut buf = Vec::with_capacity(cs.size as usize);
+                        // buf.resize(cs.size as usize, 0);
+                        // cursor.read_exact(&mut buf)?;
+
+                        // println!("code_signature: {:02x?}", buf);
+                        // println!("code_signature: {}", String::from_utf8_lossy(&buf));
+                        // cursor.seek(std::io::SeekFrom::Start(position))?;
+                    }
+                    _ => {}
+                }
+            }
+
+            if header.cputype == CPU_TYPE_X86_64 && header.cpusubtype == CPU_SUBTYPE_X86_64_ALL {
+                x86(cursor)?;
+            }
+
+            if header.cputype == CPU_TYPE_ARM64 && header.cpusubtype == CPU_SUBTYPE_ARM_ALL {
+                aarch64(cursor)?;
+            }
+        }
+        o => return Err(anyhow::anyhow!("Unsupported ofile format: {:?}", o)),
     }
 
-    f.seek(std::io::SeekFrom::Start(arch.offset + entryoff))?;
+    Ok(())
+}
+
+pub fn x86(cursor: &mut Cursor<&mut [u8]>) -> anyhow::Result<()> {
+    let position = cursor.seek(std::io::SeekFrom::Current(0))?;
 
     let mut text = [0u8; 1024];
-    f.read_exact(&mut text)?;
+    cursor.read_exact(&mut text)?;
     // println!("{:02x?}", text);
 
     let mut encoder = Encoder::new(64);
@@ -77,19 +124,18 @@ fn main() -> anyhow::Result<()> {
         if instruction.code() == Code::Cmp_rm64_imm8
             && instruction.memory_base() == Register::RBP
             && instruction.memory_displ_size() == 1
+            && instruction.immediate8() == 2
         {
-            let imm = instruction.immediate8();
-            let imm2 = instruction.immediate8_2nd();
-            println!("imm: {:02x?}", imm); // 0x2
-            println!("imm2: {:02x?}", imm2); // 0xd0
+            // let imm2 = instruction.immediate8_2nd();
+            // println!("imm2: {:02x?}", imm2); // 0xd0
 
             encoder.encode(&instruction, 0)?;
-            let opcode = encoder.take_buffer();
-            println!("opcode: {:02x?}", opcode);
+            // let opcode = encoder.take_buffer();
+            // println!("opcode: {:02x?}", opcode);
 
             output.clear();
             formatter.format(&instruction, &mut output);
-            println!("{}", output);
+            // println!("{}", output);
 
             let ip = decoder.ip();
             // println!("ip: {:#04x}", ip);
@@ -100,28 +146,26 @@ fn main() -> anyhow::Result<()> {
                     break;
                 }
                 encoder.encode(&instruction, ip)?;
-                let opcode = encoder.take_buffer();
-                println!("opcode: {:02x?}", opcode);
+                // let opcode = encoder.take_buffer();
+                // println!("opcode: {:02x?}", opcode);
                 output.clear();
                 formatter.format(&instruction, &mut output);
-                println!("{}", output);
+                // println!("{}", output);
 
                 if instruction.code() == Code::Jb_rel32_64 {
                     instruction.set_code(Code::Jmp_rel32_64);
                     encoder.encode(&instruction, ip)?;
                     let opcode = encoder.take_buffer();
-                    println!("new opcode: {:02x?}", opcode);
+                    // println!("new opcode: {:02x?}", opcode);
 
-                    output.clear();
-                    formatter.format(&instruction, &mut output);
-                    println!("{}", output);
+                    let mut new_instruction = String::new();
+                    formatter.format(&instruction, &mut new_instruction);
+                    println!("{output} => {new_instruction}");
 
-                    let mut f = OpenOptions::new().write(true).open(&args[1])?;
-                    f.seek(std::io::SeekFrom::Start(arch.offset + entryoff + ip))?;
-                    f.write(&opcode)?;
-                    f.flush()?;
+                    cursor.seek(std::io::SeekFrom::Start(position + ip))?;
+                    cursor.write(&opcode)?;
 
-                    break;
+                    return Ok(());
                 }
             }
         }
@@ -130,106 +174,66 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn parse_fat_header(f: &mut File) -> anyhow::Result<FatHeader> {
-    // https://opensource.apple.com/source/xnu/xnu-123.5/EXTERNAL_HEADERS/mach-o/fat.h.auto.html
-    // big-endian order
+pub fn aarch64(cursor: &mut Cursor<&mut [u8]>) -> anyhow::Result<()> {
+    let position = cursor.seek(std::io::SeekFrom::Current(0))?;
 
-    let mut buf = [0u8; 4];
-    f.read_exact(&mut buf)?;
-    let magic = u32::from_be_bytes(buf);
-    assert_eq!(magic, FAT_MAGIC);
+    let mut code = [0u8; 512];
+    cursor.read_exact(&mut code)?;
+    // println!("{:02x?}", code);
 
-    f.read_exact(&mut buf)?;
-    let nfat_arch = u32::from_be_bytes(buf);
+    let mut iter = code
+        .chunks_exact(4)
+        .map(|v| {
+            decoder::decode(u32::from_le_bytes(v.try_into().expect("Invalid [u8; 4]")))
+                .expect("Invalid instruction")
+        })
+        .enumerate();
 
-    let mut archs = Vec::new();
-    for _ in 0..nfat_arch {
-        let arch = parse_fat_arch(f)?;
-        archs.push(arch);
+    while let Some((_, Opcode { operation, .. })) = iter.next() {
+        // `cmp x21, #0x2` or `subs xzr, x21, #0x2`
+        if let Operation::ADDSUB_IMM(ADDSUB_IMM::SUBS_Rd_Rn_SP_AIMM(s)) = operation {
+            if get_int_reg_name(true, s.rd() as u8, true) == "xzr" && s.imm12() == 0x2 {
+                // println!("Instruction: {insn:?}");
+                // println!("Formatted: {insn}");
+                // println!("Definition: {:?}", insn.definition());
+                // println!("bits: {:02x?} {:02x?}", insn.operation.bits().to_le_bytes(), v);
+
+                // `b.cc 0x22c` or `b.lo 0x22c`
+                // https://developer.arm.com/documentation/ddi0602/2024-03/Base-Instructions/B-cond--Branch-conditionally-?lang=en
+                if let Some((
+                    i,
+                    Opcode {
+                        operation: Operation::CONDBRANCH(CONDBRANCH::B__ADDR_PCREL19(b)),
+                        ..
+                    },
+                )) = iter.next()
+                {
+                    if b.cond() == 3 {
+                        let imm19 = b.imm19();
+                        // println!("{} {}", i*4, imm19);
+                        // println!("bits: {:02x?}", insn.bits().to_le_bytes());
+
+                        let branch = B_ADDR_PCREL26::DEFINITION.opcode
+                            | B_ADDR_PCREL26::new().with_imm26(imm19).into_bits();
+
+                        let bytes = branch.to_le_bytes();
+
+                        println!(
+                            "{} => {}",
+                            decoder::decode(b.into_bits()).unwrap(),
+                            decoder::decode(branch).unwrap()
+                        );
+                        cursor.seek(std::io::SeekFrom::Start(position + i as u64 * 4))?;
+                        cursor.write(&bytes)?;
+
+                        return Ok(());
+                    }
+                }
+            }
+        }
     }
 
-    Ok(FatHeader { magic, archs })
-}
-
-fn parse_fat_arch(f: &mut File) -> anyhow::Result<FatArch> {
-    let mut bytes = [0u8; 4];
-
-    f.read_exact(&mut bytes)?;
-    let cputype = i32::from_be_bytes(bytes);
-    f.read_exact(&mut bytes)?;
-    let cpusubtype = i32::from_be_bytes(bytes);
-    f.read_exact(&mut bytes)?;
-    let offset = u32::from_be_bytes(bytes) as u64;
-    f.read_exact(&mut bytes)?;
-    let size = u32::from_be_bytes(bytes) as u64;
-    f.read_exact(&mut bytes)?;
-    let align = u32::from_be_bytes(bytes);
-
-    Ok(FatArch {
-        cputype,
-        cpusubtype,
-        offset,
-        size,
-        align,
-    })
-}
-
-fn parse_mach_header(f: &mut File) -> anyhow::Result<MachHeader> {
-    let mut bytes = [0u8; 4];
-    f.read_exact(&mut bytes)?;
-    let magic = u32::from_ne_bytes(bytes);
-
-    let mut cputype = 0;
-    let mut cpusubtype = 0;
-    let mut filetype = 0;
-    let mut ncmds = 0;
-    let mut sizeofcmds = 0;
-    let mut flags = 0;
-
-    if magic == MH_MAGIC_64 || magic == MH_MAGIC {
-        // Little endian
-        f.read_exact(&mut bytes)?;
-        cputype = i32::from_le_bytes(bytes);
-        f.read_exact(&mut bytes)?;
-        cpusubtype = i32::from_le_bytes(bytes);
-        f.read_exact(&mut bytes)?;
-        filetype = u32::from_le_bytes(bytes);
-        f.read_exact(&mut bytes)?;
-        ncmds = u32::from_le_bytes(bytes);
-        f.read_exact(&mut bytes)?;
-        sizeofcmds = u32::from_le_bytes(bytes);
-        f.read_exact(&mut bytes)?;
-        flags = u32::from_le_bytes(bytes);
-    } else if magic == MH_CIGAM_64 || magic == MH_CIGAM {
-        // Big endian
-        f.read_exact(&mut bytes)?;
-        cputype = i32::from_be_bytes(bytes);
-        f.read_exact(&mut bytes)?;
-        cpusubtype = i32::from_be_bytes(bytes);
-        f.read_exact(&mut bytes)?;
-        filetype = u32::from_be_bytes(bytes);
-        f.read_exact(&mut bytes)?;
-        ncmds = u32::from_be_bytes(bytes);
-        f.read_exact(&mut bytes)?;
-        sizeofcmds = u32::from_be_bytes(bytes);
-        f.read_exact(&mut bytes)?;
-        flags = u32::from_be_bytes(bytes);
-    }
-
-    if cputype & CPU_ARCH_ABI64 != 0 {
-        // ignore reserved
-        f.seek(std::io::SeekFrom::Current(4))?;
-    }
-
-    Ok(MachHeader {
-        magic,
-        cputype,
-        cpusubtype,
-        filetype,
-        ncmds,
-        sizeofcmds,
-        flags,
-    })
+    Ok(())
 }
 
 #[test]

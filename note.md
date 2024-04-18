@@ -1,5 +1,10 @@
 
 # 1
+https://defuse.ca/online-x86-assembler.htm
+
+
+https://shell-storm.org/online/Online-Assembler-and-Disassembler/?arch=arm64
+
 
 Raw Hex (zero bytes in bold):
 
@@ -54,3 +59,11 @@ Disassembly:
 
 
 
+# arm64
+
+```asm
+cmp        x21, #0x2
+b.lo   loc_1014b2e48
+```
+
+B.LO (less than, unsigned)
