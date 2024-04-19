@@ -10,7 +10,7 @@ jb     loc_00000012345678
 并将 `jb` 修改为 `jmp`
 
 
-# TLDR
+# TL;DR
 ```console
 # 改权限
 sudo chown -R $(whoami) /Applications/WeChat.app
@@ -22,7 +22,9 @@ echo 'done'
 
 ================================================================
 
-# 先找到 architecture 的偏移
+# How it works
+
+## 先找到 architecture 的偏移
 
 ```console
 otool -f /Applications/WeChat.app/Contents/MacOS/WeChat
@@ -49,7 +51,7 @@ architecture 1
 第一个 architecture 就是 X86_64, 它的 offset 是 16384
 
 
-# 找到 X86_64 对应的 MachO Header
+## 找到 X86_64 对应的 MachO Header
 
 ```console
 xxd -s 16384 -l 32 /Applications/WeChat.app/Contents/MacOS/WeChat
@@ -61,10 +63,10 @@ xxd -s 16384 -l 32 /Applications/WeChat.app/Contents/MacOS/WeChat
 
 0x6b 是 number of load commands, 转换成十进制就是 107
 
-# 遍历 load_command 找到 entry_point_command
+## 遍历 load_command 找到 entry_point_command
 
 
-# 结构体
+## 结构体
 
 ```c
 #define FAT_MAGIC    0xcafebabe

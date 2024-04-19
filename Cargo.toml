@@ -21,4 +21,4 @@ memmap = "0.7.0"
 
 
 [patch.crates-io]
-disarm64 = {git = "https://github.com/hangj/disarm64"}
+disarm64 = {git = "https://github.com/hangj/disarm64", rev = "6a414ca17cac0797bda3933a1dffe6369187d8e7"}
