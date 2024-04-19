@@ -170,7 +170,7 @@ dependencies = [
 [[package]]
 name = "disarm64"
 version = "0.1.13"
-source = "git+https://github.com/hangj/disarm64?rev=6a414ca17cac0797bda3933a1dffe6369187d8e7#6a414ca17cac0797bda3933a1dffe6369187d8e7"
+source = "git+https://github.com/hangj/disarm64#6a414ca17cac0797bda3933a1dffe6369187d8e7"
 dependencies = [
  "anyhow",
  "bitfield-struct",
