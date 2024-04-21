@@ -19,6 +19,13 @@ iced-x86 = "1.21.0"
 mach_object = "0.1.17"
 memmap = "0.7.0"
 
+[profile.release]
+# strip binary is PATH dependent which breaks builds in MacOS
+# https://www.reddit.com/r/rust/comments/1bn5ubs/all_cargo_installs_in_latest_rust_version_1770/
+# https://github.com/rust-lang/rust/issues/123114
+# https://github.com/rust-lang/rust/issues/122902#issuecomment-2016033638
+# https://github.com/NixOS/nixpkgs/issues/299606
+strip = "none" # This is a workaround for now
 
 [patch.crates-io]
 disarm64 = {git = "https://github.com/hangj/disarm64"}
