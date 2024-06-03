@@ -12,11 +12,8 @@ jb     loc_00000012345678
 
 # TL;DR
 ```console
-# 改权限
-sudo chown -R $(whoami) /Applications/WeChat.app
-
 cargo install --git https://github.com/hangj/wechat-multi.git
-wechat-multi /Applications/WeChat.app/Contents/MacOS/WeChat
+sudo wechat-multi /Applications/WeChat.app/Contents/MacOS/WeChat
 echo 'done'
 ```
 

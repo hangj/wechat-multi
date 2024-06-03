@@ -169,8 +169,9 @@ dependencies = [
 
 [[package]]
 name = "disarm64"
-version = "0.1.13"
-source = "git+https://github.com/hangj/disarm64#6a414ca17cac0797bda3933a1dffe6369187d8e7"
+version = "0.1.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "302dafb7d3fbdd68e4dad021aeb0f006d554b170c43e3e564ca0e0a5f0f9a98c"
 dependencies = [
  "anyhow",
  "bitfield-struct",
@@ -190,9 +191,9 @@ dependencies = [
 
 [[package]]
 name = "disarm64_defn"
-version = "0.1.5"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d57f8dbfb674046d06fef858da1f135bf85e11aa749926c297f905475164e392"
+checksum = "f55f2962d408162f747fc35140e56801632a9235dff39157077988327d53f354"
 dependencies = [
  "bitflags 2.5.0",
  "serde",
