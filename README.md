@@ -1,25 +1,54 @@
 # Mac 微信多开
 
-自动在 `main` 函数中找到下面的代码
+通过修改微信二进制文件中的汇编指令来达到多开的目的
+
+## 如何使用
+
+```console
+cargo install wechat-multi
+sudo wechat-multi /Applications/WeChat.app/Contents/MacOS/WeChat
+```
+
+## 可能遇到的问题
+
+https://github.com/hangj/multi-wechat?tab=readme-ov-file#%E5%8F%AF%E8%83%BD%E9%81%87%E5%88%B0%E7%9A%84%E9%97%AE%E9%A2%98
+
+================================================================
+
+# How it works
+
+自动在 `main` 函数中修改下面的代码
+
+
+- x86_64:
 
 ```asm
 cmp    QWORD PTR [rbp-0x30],0x2
 jb     loc_00000012345678
 ```
 
-并将 `jb` 修改为 `jmp`
+=>
 
-
-# TL;DR
-```console
-cargo install --git https://github.com/hangj/wechat-multi.git
-sudo wechat-multi /Applications/WeChat.app/Contents/MacOS/WeChat
-echo 'done'
+```asm
+cmp    QWORD PTR [rbp-0x30],0x2
+jmp loc_00000012345678
 ```
 
-================================================================
 
-# How it works
+- aarch64:
+
+```asm
+b.cc 0x22c
+```
+
+=>
+
+```asm
+b 0x22c
+```
+
+
+
 
 ## 先找到 architecture 的偏移
 
